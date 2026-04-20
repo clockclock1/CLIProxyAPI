@@ -816,19 +816,78 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 		headers.Set("Authorization", "Bearer "+token)
 	}
 
+	// Collect any headers forwarded from the downstream client.
 	var ginHeaders http.Header
 	if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil && ginCtx.Request != nil {
 		ginHeaders = ginCtx.Request.Header.Clone()
 	}
 
-	_, cfgBetaFeatures := codexHeaderDefaults(cfg, auth)
-	ensureHeaderWithPriority(headers, ginHeaders, "x-codex-beta-features", cfgBetaFeatures, "")
-	misc.EnsureHeader(headers, ginHeaders, "x-codex-turn-state", "")
-	misc.EnsureHeader(headers, ginHeaders, "x-codex-turn-metadata", "")
-	misc.EnsureHeader(headers, ginHeaders, "x-client-request-id", "")
-	misc.EnsureHeader(headers, ginHeaders, "x-responsesapi-include-timing-metrics", "")
-	misc.EnsureHeader(headers, ginHeaders, "Version", "")
+	// --- Per-account fingerprint ---------------------------------------------
+	fp := resolveCodexFingerprint(auth)
 
+	// User-Agent: WebSocket upgrade requests from codex-tui carry the same UA
+	// as HTTP requests. gorilla/websocket sends it in the Upgrade handshake.
+	// We set it here so the dialer picks it up via the header map.
+	cfgUserAgent, cfgBetaFeatures := codexHeaderDefaults(cfg, auth)
+	effectiveFallbackUA := fp.UserAgent
+	if effectiveFallbackUA == "" {
+		effectiveFallbackUA = codexUserAgent
+	}
+	// For WebSocket, set UA directly (gorilla reads from headers map).
+	if headers.Get("User-Agent") == "" {
+		if cfgUserAgent != "" {
+			headers.Set("User-Agent", cfgUserAgent)
+		} else if v := strings.TrimSpace(ginHeaders.Get("User-Agent")); v != "" {
+			headers.Set("User-Agent", v)
+		} else {
+			headers.Set("User-Agent", effectiveFallbackUA)
+		}
+	}
+
+	// Version: must match TUI version in UA.
+	if fp.TUIVersion != "" {
+		misc.EnsureHeader(headers, ginHeaders, "Version", fp.TUIVersion)
+	} else {
+		misc.EnsureHeader(headers, ginHeaders, "Version", "")
+	}
+
+	// Accept-Language: stable per-account locale.
+	if fp.AcceptLanguage != "" && headers.Get("Accept-Language") == "" {
+		headers.Set("Accept-Language", fp.AcceptLanguage)
+	}
+
+	// --- Session / turn headers ----------------------------------------------
+
+	// Session_id: keep if already set by prompt-cache logic, else generate.
+	if headers.Get("Session_id") == "" {
+		if strings.Contains(headers.Get("User-Agent"), "Mac OS") {
+			headers.Set("Session_id", uuid.NewString())
+		}
+	}
+
+	// X-Client-Request-Id: fresh UUID per WebSocket upgrade.
+	if headers.Get("x-client-request-id") == "" {
+		if v := strings.TrimSpace(ginHeaders.Get("x-client-request-id")); v != "" {
+			headers.Set("x-client-request-id", v)
+		} else {
+			headers.Set("x-client-request-id", uuid.NewString())
+		}
+	}
+
+	// X-Codex-Turn-Metadata: forwarded or synthesised.
+	if v := strings.TrimSpace(ginHeaders.Get("x-codex-turn-metadata")); v != "" {
+		headers.Set("x-codex-turn-metadata", v)
+	} else if fp.Timezone != "" && headers.Get("x-codex-turn-metadata") == "" {
+		headers.Set("x-codex-turn-metadata", buildCodexTurnMetadata(fp))
+	}
+
+	misc.EnsureHeader(headers, ginHeaders, "x-codex-turn-state", "")
+	misc.EnsureHeader(headers, ginHeaders, "x-responsesapi-include-timing-metrics", "")
+
+	// X-Codex-Beta-Features: config > client > empty.
+	ensureHeaderWithPriority(headers, ginHeaders, "x-codex-beta-features", cfgBetaFeatures, "")
+
+	// OpenAI-Beta: WebSocket upgrade must carry the responses_websockets value.
 	betaHeader := strings.TrimSpace(headers.Get("OpenAI-Beta"))
 	if betaHeader == "" && ginHeaders != nil {
 		betaHeader = strings.TrimSpace(ginHeaders.Get("OpenAI-Beta"))
@@ -838,13 +897,7 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 	}
 	headers.Set("OpenAI-Beta", betaHeader)
 
-	// Per-account fingerprint for WebSocket upgrade headers.
-	fp := resolveCodexFingerprint(auth)
-	if strings.Contains(headers.Get("User-Agent"), "Mac OS") {
-		misc.EnsureHeader(headers, ginHeaders, "Session_id", uuid.NewString())
-	}
-	headers.Del("User-Agent")
-	// Inject stable device headers so each account looks like a distinct installation.
+	// --- Stable device identity headers --------------------------------------
 	if fp.MachineID != "" && headers.Get("X-Machine-Id") == "" {
 		headers.Set("X-Machine-Id", fp.MachineID)
 	}
@@ -852,6 +905,7 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 		headers.Set("X-Codex-Client-Build", fp.ClientBuild)
 	}
 
+	// --- Originator + account identity ---------------------------------------
 	isAPIKey := false
 	if auth != nil && auth.Attributes != nil {
 		if v := strings.TrimSpace(auth.Attributes["api_key"]); v != "" {
@@ -873,6 +927,7 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 		}
 	}
 
+	// --- Custom per-credential headers from config ---------------------------
 	var attrs map[string]string
 	if auth != nil {
 		attrs = auth.Attributes

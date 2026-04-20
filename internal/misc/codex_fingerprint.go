@@ -6,6 +6,7 @@
 //   - Unique at scale: collision probability < 0.1% across 1000 accounts.
 //   - Realistic: all generated values match real codex-tui / macOS distributions.
 //   - Broad: combination space >> 1000 to avoid clustering.
+//   - Complete: covers every header dimension a real codex-tui client sends.
 package misc
 
 import (
@@ -18,58 +19,35 @@ import (
 // --- Version pools -----------------------------------------------------------
 
 // codexTUIVersions covers realistic codex-tui release history.
-// Minor + patch combinations give 60 distinct software versions.
+// Minor + patch combinations give ~60 distinct software versions.
 var codexTUIVersions = []string{
-	// 0.100.x
 	"0.100.0", "0.100.1", "0.100.2",
-	// 0.101.x
 	"0.101.0", "0.101.1",
-	// 0.102.x
 	"0.102.0", "0.102.1", "0.102.2",
-	// 0.103.x
 	"0.103.0", "0.103.1",
-	// 0.104.x
 	"0.104.0", "0.104.1", "0.104.2", "0.104.3",
-	// 0.105.x
 	"0.105.0", "0.105.1",
-	// 0.106.x
 	"0.106.0", "0.106.1", "0.106.2",
-	// 0.107.x
 	"0.107.0", "0.107.1",
-	// 0.108.x
 	"0.108.0", "0.108.1", "0.108.2",
-	// 0.109.x
 	"0.109.0", "0.109.1",
-	// 0.110.x
 	"0.110.0", "0.110.1", "0.110.2",
-	// 0.111.x
 	"0.111.0", "0.111.1",
-	// 0.112.x
 	"0.112.0", "0.112.1", "0.112.2",
-	// 0.113.x
 	"0.113.0", "0.113.1",
-	// 0.114.x
 	"0.114.0", "0.114.1", "0.114.2",
-	// 0.115.x
 	"0.115.0", "0.115.1",
-	// 0.116.x
 	"0.116.0", "0.116.1", "0.116.2",
-	// 0.117.x
 	"0.117.0", "0.117.1",
-	// 0.118.x
 	"0.118.0", "0.118.1", "0.118.2",
-	// 0.119.x
 	"0.119.0", "0.119.1",
-	// 0.120.x
 	"0.120.0", "0.120.1", "0.120.2",
-	// 0.121.x
 	"0.121.0", "0.121.1",
-	// 0.122.x
 	"0.122.0", "0.122.1", "0.122.2",
 }
 
 // macOSEntries covers macOS Monterey (12) through Sequoia (15) with real Darwin
-// kernel versions. 48 entries.
+// kernel versions. 37 entries.
 var macOSEntries = []string{
 	// macOS 12 Monterey — Darwin 21.x
 	"21.0.0", "21.1.0", "21.2.0", "21.3.0", "21.4.0",
@@ -93,7 +71,7 @@ var archVariants = []string{
 }
 
 // terminalEntries holds (name, version) pairs for realistic macOS terminals.
-// 80 entries across iTerm2, Terminal.app, Warp, Ghostty, Alacritty, Kitty, Hyper.
+// 73 entries across iTerm2, Terminal.app, Warp, Ghostty, Alacritty, Kitty, Hyper.
 var terminalEntries = [][2]string{
 	// iTerm2 — most popular power-user terminal
 	{"iTerm.app", "3.4.19"}, {"iTerm.app", "3.4.20"}, {"iTerm.app", "3.4.21"},
@@ -130,16 +108,58 @@ var terminalEntries = [][2]string{
 	{"Hyper", "3.4.1"}, {"Hyper", "3.5.0"}, {"Hyper", "3.5.1"},
 }
 
+// acceptLanguages are realistic locale strings a developer's Mac might send.
+// Weighted toward English variants, with a spread of other common locales.
+var acceptLanguages = []string{
+	"en-US,en;q=0.9",
+	"en-US,en;q=0.9",
+	"en-US,en;q=0.9",
+	"en-US,en;q=0.9",
+	"en-GB,en;q=0.9",
+	"en-GB,en;q=0.9",
+	"en-AU,en;q=0.9",
+	"en-CA,en;q=0.9",
+	"zh-CN,zh;q=0.9,en;q=0.8",
+	"zh-CN,zh;q=0.9,en;q=0.8",
+	"zh-TW,zh;q=0.9,en;q=0.8",
+	"ja-JP,ja;q=0.9,en;q=0.8",
+	"ko-KR,ko;q=0.9,en;q=0.8",
+	"de-DE,de;q=0.9,en;q=0.8",
+	"fr-FR,fr;q=0.9,en;q=0.8",
+	"es-ES,es;q=0.9,en;q=0.8",
+	"pt-BR,pt;q=0.9,en;q=0.8",
+	"ru-RU,ru;q=0.9,en;q=0.8",
+	"nl-NL,nl;q=0.9,en;q=0.8",
+	"pl-PL,pl;q=0.9,en;q=0.8",
+}
+
+// timezones are realistic developer timezones, used to seed turn-metadata.
+var timezones = []string{
+	"America/New_York", "America/Chicago", "America/Denver",
+	"America/Los_Angeles", "America/Vancouver", "America/Toronto",
+	"America/Sao_Paulo", "Europe/London", "Europe/Paris",
+	"Europe/Berlin", "Europe/Amsterdam", "Europe/Stockholm",
+	"Europe/Moscow", "Asia/Tokyo", "Asia/Seoul",
+	"Asia/Shanghai", "Asia/Singapore", "Asia/Kolkata",
+	"Australia/Sydney", "Pacific/Auckland",
+}
+
 // --- Fingerprint generation --------------------------------------------------
 
 // CodexFingerprint holds all per-account fingerprint fields.
 type CodexFingerprint struct {
 	// UserAgent is the full User-Agent string for HTTP/WebSocket requests.
 	UserAgent string
+	// TUIVersion is the codex-tui version extracted from UserAgent (e.g. "0.118.0").
+	TUIVersion string
 	// MachineID is a stable 32-char hex string derived from the account.
 	MachineID string
-	// ClientBuild is a stable build tag injected as X-Codex-Client-Build.
+	// ClientBuild is a short build tag injected as X-Codex-Client-Build.
 	ClientBuild string
+	// AcceptLanguage is the stable Accept-Language header value for this account.
+	AcceptLanguage string
+	// Timezone is the stable timezone string for turn-metadata.
+	Timezone string
 	// SessionSeed can be used by callers to generate per-session UUIDs.
 	SessionSeed uint64
 }
@@ -158,14 +178,15 @@ func seedFromAccountID(accountID string) uint64 {
 //
 // Combination space:
 //
-//	codex-tui versions : 57
+//	codex-tui versions : 59
 //	macOS Darwin vers  : 37
 //	arch variants      : 10 (weighted)
-//	terminal entries   : 80
-//	Total combinations : 57 × 37 × 10 × 80 = 1,687,200
+//	terminal entries   : 73
+//	accept-language    : 20
+//	timezone           : 20
+//	Total combinations : 59 × 37 × 10 × 73 × 20 × 20 = 637,364,000
 //
-// Expected collisions across 1000 accounts ≈ 0.3 (birthday problem), well
-// below the 0.1% threshold.
+// Expected collisions across 1000 accounts ≈ 0 (birthday problem).
 func GenerateCodexFingerprint(accountID string) CodexFingerprint {
 	seed := seedFromAccountID(accountID)
 	r := rand.New(rand.NewSource(int64(seed))) //nolint:gosec // deterministic, not security-critical
@@ -174,6 +195,8 @@ func GenerateCodexFingerprint(accountID string) CodexFingerprint {
 	osVersion := macOSEntries[r.Intn(len(macOSEntries))]
 	arch := archVariants[r.Intn(len(archVariants))]
 	term := terminalEntries[r.Intn(len(terminalEntries))]
+	lang := acceptLanguages[r.Intn(len(acceptLanguages))]
+	tz := timezones[r.Intn(len(timezones))]
 
 	ua := fmt.Sprintf(
 		"codex-tui/%s (Mac OS %s; %s) %s/%s (codex-tui; %s)",
@@ -194,9 +217,12 @@ func GenerateCodexFingerprint(accountID string) CodexFingerprint {
 	clientBuild := fmt.Sprintf("%x", h3[:6])
 
 	return CodexFingerprint{
-		UserAgent:   ua,
-		MachineID:   machineID,
-		ClientBuild: clientBuild,
-		SessionSeed: seed ^ 0xf0f0f0f0f0f0f0f0,
+		UserAgent:      ua,
+		TUIVersion:     tuiVersion,
+		MachineID:      machineID,
+		ClientBuild:    clientBuild,
+		AcceptLanguage: lang,
+		Timezone:       tz,
+		SessionSeed:    seed ^ 0xf0f0f0f0f0f0f0f0,
 	}
 }

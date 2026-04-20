@@ -678,23 +678,20 @@ func (e *CodexExecutor) cacheHelper(ctx context.Context, from sdktranslator.Form
 }
 
 func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, stream bool, cfg *config.Config) {
+	// --- Mandatory transport headers -----------------------------------------
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+token)
 
+	// Collect any headers forwarded from the downstream client.
 	var ginHeaders http.Header
 	if ginCtx, ok := r.Context().Value("gin").(*gin.Context); ok && ginCtx != nil && ginCtx.Request != nil {
 		ginHeaders = ginCtx.Request.Header
 	}
 
-	if ginHeaders.Get("X-Codex-Beta-Features") != "" {
-		r.Header.Set("X-Codex-Beta-Features", ginHeaders.Get("X-Codex-Beta-Features"))
-	}
-	misc.EnsureHeader(r.Header, ginHeaders, "Version", "")
-	misc.EnsureHeader(r.Header, ginHeaders, "X-Codex-Turn-Metadata", "")
-	misc.EnsureHeader(r.Header, ginHeaders, "X-Client-Request-Id", "")
-
-	// Resolve per-account fingerprint for OAuth accounts.
+	// --- Per-account fingerprint ---------------------------------------------
 	fp := resolveCodexFingerprint(auth)
+
+	// User-Agent: config > client-forwarded > per-account fingerprint > hardcoded fallback.
 	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
 	effectiveFallbackUA := fp.UserAgent
 	if effectiveFallbackUA == "" {
@@ -702,12 +699,62 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 	}
 	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, effectiveFallbackUA)
 
-	// Always inject Session_id for Mac OS UA (real codex-tui behaviour).
-	if strings.Contains(r.Header.Get("User-Agent"), "Mac OS") {
-		misc.EnsureHeader(r.Header, ginHeaders, "Session_id", uuid.NewString())
+	// Version: must match the TUI version embedded in the User-Agent.
+	// Real codex-tui always sends this header with its own version string.
+	if fp.TUIVersion != "" {
+		misc.EnsureHeader(r.Header, ginHeaders, "Version", fp.TUIVersion)
+	} else {
+		misc.EnsureHeader(r.Header, ginHeaders, "Version", "")
 	}
 
-	// Inject stable device headers so each account looks like a distinct installation.
+	// Accept-Language: stable per-account locale, mimics a real developer's OS setting.
+	if fp.AcceptLanguage != "" && r.Header.Get("Accept-Language") == "" {
+		r.Header.Set("Accept-Language", fp.AcceptLanguage)
+	}
+
+	// Accept-Encoding: Go's net/http sets this automatically, but codex-tui
+	// (built with Go) sends exactly "gzip" — not "gzip, deflate, br".
+	r.Header.Set("Accept-Encoding", "gzip")
+
+	// --- Session / turn headers ----------------------------------------------
+
+	// Session_id: real codex-tui sends a UUID per-session (not per-request).
+	// If cacheHelper already set one (from prompt_cache_key), keep it.
+	// Otherwise generate a fresh one for this request.
+	if r.Header.Get("Session_id") == "" {
+		if strings.Contains(r.Header.Get("User-Agent"), "Mac OS") {
+			r.Header.Set("Session_id", uuid.NewString())
+		}
+	}
+
+	// X-Client-Request-Id: fresh UUID per request, used for deduplication.
+	if r.Header.Get("X-Client-Request-Id") == "" {
+		if v := strings.TrimSpace(ginHeaders.Get("X-Client-Request-Id")); v != "" {
+			r.Header.Set("X-Client-Request-Id", v)
+		} else {
+			r.Header.Set("X-Client-Request-Id", uuid.NewString())
+		}
+	}
+
+	// X-Codex-Turn-Metadata: JSON blob with timezone + locale, forwarded or synthesised.
+	if v := strings.TrimSpace(ginHeaders.Get("X-Codex-Turn-Metadata")); v != "" {
+		r.Header.Set("X-Codex-Turn-Metadata", v)
+	} else if fp.Timezone != "" && r.Header.Get("X-Codex-Turn-Metadata") == "" {
+		r.Header.Set("X-Codex-Turn-Metadata", buildCodexTurnMetadata(fp))
+	}
+
+	// X-Codex-Beta-Features: forward from client if present.
+	if v := strings.TrimSpace(ginHeaders.Get("X-Codex-Beta-Features")); v != "" {
+		r.Header.Set("X-Codex-Beta-Features", v)
+	}
+
+	// OpenAI-Beta: real codex-tui HTTP requests carry this on streaming calls.
+	if stream && r.Header.Get("OpenAI-Beta") == "" {
+		r.Header.Set("OpenAI-Beta", "responses=2025-02-06")
+	}
+
+	// --- Stable device identity headers --------------------------------------
+	// These make each OAuth account look like a distinct physical installation.
 	if fp.MachineID != "" && r.Header.Get("X-Machine-Id") == "" {
 		r.Header.Set("X-Machine-Id", fp.MachineID)
 	}
@@ -715,6 +762,7 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 		r.Header.Set("X-Codex-Client-Build", fp.ClientBuild)
 	}
 
+	// --- Accept / connection -------------------------------------------------
 	if stream {
 		r.Header.Set("Accept", "text/event-stream")
 	} else {
@@ -722,6 +770,7 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 	}
 	r.Header.Set("Connection", "Keep-Alive")
 
+	// --- Originator + account identity ---------------------------------------
 	isAPIKey := false
 	if auth != nil && auth.Attributes != nil {
 		if v := strings.TrimSpace(auth.Attributes["api_key"]); v != "" {
@@ -740,11 +789,25 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 			}
 		}
 	}
+
+	// --- Custom per-credential headers from config ---------------------------
 	var attrs map[string]string
 	if auth != nil {
 		attrs = auth.Attributes
 	}
 	util.ApplyCustomHeadersFromAttrs(r, attrs)
+}
+
+// buildCodexTurnMetadata returns a minimal JSON string matching the
+// X-Codex-Turn-Metadata format that real codex-tui sends.
+func buildCodexTurnMetadata(fp misc.CodexFingerprint) string {
+	// Real format observed from codex-tui network captures:
+	// {"timezone":"America/New_York","locale":"en-US"}
+	locale := fp.AcceptLanguage
+	if idx := strings.Index(locale, ","); idx > 0 {
+		locale = locale[:idx]
+	}
+	return fmt.Sprintf(`{"timezone":%q,"locale":%q}`, fp.Timezone, locale)
 }
 
 // resolveCodexFingerprint returns a per-account CodexFingerprint.
