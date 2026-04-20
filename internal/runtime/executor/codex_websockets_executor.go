@@ -837,10 +837,20 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 		betaHeader = codexResponsesWebsocketBetaHeaderValue
 	}
 	headers.Set("OpenAI-Beta", betaHeader)
+
+	// Per-account fingerprint for WebSocket upgrade headers.
+	fp := resolveCodexFingerprint(auth)
 	if strings.Contains(headers.Get("User-Agent"), "Mac OS") {
 		misc.EnsureHeader(headers, ginHeaders, "Session_id", uuid.NewString())
 	}
 	headers.Del("User-Agent")
+	// Inject stable device headers so each account looks like a distinct installation.
+	if fp.MachineID != "" && headers.Get("X-Machine-Id") == "" {
+		headers.Set("X-Machine-Id", fp.MachineID)
+	}
+	if fp.ClientBuild != "" && headers.Get("X-Codex-Client-Build") == "" {
+		headers.Set("X-Codex-Client-Build", fp.ClientBuild)
+	}
 
 	isAPIKey := false
 	if auth != nil && auth.Attributes != nil {

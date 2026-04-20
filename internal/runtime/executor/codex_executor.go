@@ -30,7 +30,8 @@ import (
 )
 
 const (
-	codexUserAgent  = "codex-tui/0.118.0 (Mac OS 26.3.1; arm64) iTerm.app/3.6.9 (codex-tui; 0.118.0)"
+	// codexUserAgent is the fallback UA used only when no account_id is available.
+	codexUserAgent  = "codex-tui/0.118.0 (Mac OS 23.6.0; arm64) iTerm.app/3.6.9 (codex-tui; 0.118.0)"
 	codexOriginator = "codex-tui"
 )
 
@@ -691,11 +692,27 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 	misc.EnsureHeader(r.Header, ginHeaders, "Version", "")
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Codex-Turn-Metadata", "")
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Client-Request-Id", "")
-	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
-	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, codexUserAgent)
 
+	// Resolve per-account fingerprint for OAuth accounts.
+	fp := resolveCodexFingerprint(auth)
+	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
+	effectiveFallbackUA := fp.UserAgent
+	if effectiveFallbackUA == "" {
+		effectiveFallbackUA = codexUserAgent
+	}
+	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, effectiveFallbackUA)
+
+	// Always inject Session_id for Mac OS UA (real codex-tui behaviour).
 	if strings.Contains(r.Header.Get("User-Agent"), "Mac OS") {
 		misc.EnsureHeader(r.Header, ginHeaders, "Session_id", uuid.NewString())
+	}
+
+	// Inject stable device headers so each account looks like a distinct installation.
+	if fp.MachineID != "" && r.Header.Get("X-Machine-Id") == "" {
+		r.Header.Set("X-Machine-Id", fp.MachineID)
+	}
+	if fp.ClientBuild != "" && r.Header.Get("X-Codex-Client-Build") == "" {
+		r.Header.Set("X-Codex-Client-Build", fp.ClientBuild)
 	}
 
 	if stream {
@@ -728,6 +745,31 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 		attrs = auth.Attributes
 	}
 	util.ApplyCustomHeadersFromAttrs(r, attrs)
+}
+
+// resolveCodexFingerprint returns a per-account CodexFingerprint.
+// For API-key accounts it returns an empty fingerprint (no spoofing needed).
+func resolveCodexFingerprint(auth *cliproxyauth.Auth) misc.CodexFingerprint {
+	if auth == nil {
+		return misc.GenerateCodexFingerprint("")
+	}
+	// API-key accounts don't need fingerprint spoofing.
+	if auth.Attributes != nil {
+		if v := strings.TrimSpace(auth.Attributes["api_key"]); v != "" {
+			return misc.CodexFingerprint{}
+		}
+	}
+	accountID := ""
+	if auth.Metadata != nil {
+		if v, ok := auth.Metadata["account_id"].(string); ok {
+			accountID = strings.TrimSpace(v)
+		}
+	}
+	// Fall back to auth.ID (filename) as seed when account_id is absent.
+	if accountID == "" {
+		accountID = auth.ID
+	}
+	return misc.GenerateCodexFingerprint(accountID)
 }
 
 func newCodexStatusErr(statusCode int, body []byte) statusErr {
