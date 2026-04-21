@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/fingerprint"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
@@ -821,13 +822,25 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 		ginHeaders = ginCtx.Request.Header.Clone()
 	}
 
+	// Resolve per-account fingerprint for unique, stable device identity.
+	accountID := codexAccountID(auth)
+	fp := fingerprint.ForAccount(accountID)
+
 	_, cfgBetaFeatures := codexHeaderDefaults(cfg, auth)
-	ensureHeaderWithPriority(headers, ginHeaders, "x-codex-beta-features", cfgBetaFeatures, "")
+	// Beta features priority: gin > config > per-account fingerprint
+	betaFallback := fp.BetaFeatures
+	if betaFallback == "" {
+		betaFallback = codexResponsesWebsocketBetaHeaderValue
+	}
+	ensureHeaderWithPriority(headers, ginHeaders, "x-codex-beta-features", cfgBetaFeatures, betaFallback)
+
 	misc.EnsureHeader(headers, ginHeaders, "x-codex-turn-state", "")
 	misc.EnsureHeader(headers, ginHeaders, "x-codex-turn-metadata", "")
 	misc.EnsureHeader(headers, ginHeaders, "x-client-request-id", "")
 	misc.EnsureHeader(headers, ginHeaders, "x-responsesapi-include-timing-metrics", "")
-	misc.EnsureHeader(headers, ginHeaders, "Version", "")
+
+	// Version: per-account fingerprint as fallback.
+	misc.EnsureHeader(headers, ginHeaders, "Version", fp.Version)
 
 	betaHeader := strings.TrimSpace(headers.Get("OpenAI-Beta"))
 	if betaHeader == "" && ginHeaders != nil {
@@ -837,9 +850,17 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 		betaHeader = codexResponsesWebsocketBetaHeaderValue
 	}
 	headers.Set("OpenAI-Beta", betaHeader)
-	if strings.Contains(headers.Get("User-Agent"), "Mac OS") {
-		misc.EnsureHeader(headers, ginHeaders, "Session_id", uuid.NewString())
+
+	// Session_id: fresh per-request UUID seeded from account fingerprint.
+	if strings.Contains(fp.UserAgent, "Mac OS") {
+		if ginHeaders.Get("Session_id") != "" {
+			headers.Set("Session_id", ginHeaders.Get("Session_id"))
+		} else {
+			headers.Set("Session_id", fingerprint.NewSessionID(fp))
+		}
 	}
+	// WebSocket executor does not set User-Agent (gorilla/websocket handles it),
+	// but we delete any stale value to avoid leaking the shared constant.
 	headers.Del("User-Agent")
 
 	isAPIKey := false
@@ -855,8 +876,8 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 	}
 	if !isAPIKey {
 		if auth != nil && auth.Metadata != nil {
-			if accountID, ok := auth.Metadata["account_id"].(string); ok {
-				if trimmed := strings.TrimSpace(accountID); trimmed != "" {
+			if aid, ok := auth.Metadata["account_id"].(string); ok {
+				if trimmed := strings.TrimSpace(aid); trimmed != "" {
 					headers.Set("Chatgpt-Account-Id", trimmed)
 				}
 			}

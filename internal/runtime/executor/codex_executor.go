@@ -13,6 +13,7 @@ import (
 
 	codexauth "github.com/router-for-me/CLIProxyAPI/v6/internal/auth/codex"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/fingerprint"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
@@ -756,17 +757,33 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 		ginHeaders = ginCtx.Request.Header
 	}
 
+	// Resolve per-account fingerprint for unique, stable device identity.
+	accountID := codexAccountID(auth)
+	fp := fingerprint.ForAccount(accountID)
+
+	// Beta features: gin > config > per-account fingerprint
 	if ginHeaders.Get("X-Codex-Beta-Features") != "" {
 		r.Header.Set("X-Codex-Beta-Features", ginHeaders.Get("X-Codex-Beta-Features"))
+	} else if fp.BetaFeatures != "" {
+		r.Header.Set("X-Codex-Beta-Features", fp.BetaFeatures)
 	}
-	misc.EnsureHeader(r.Header, ginHeaders, "Version", "")
+
+	// Version header: use per-account fingerprint version as fallback.
+	misc.EnsureHeader(r.Header, ginHeaders, "Version", fp.Version)
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Codex-Turn-Metadata", "")
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Client-Request-Id", "")
-	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
-	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, codexUserAgent)
 
+	// User-Agent: config > gin > per-account fingerprint (never the shared constant).
+	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
+	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, fp.UserAgent)
+
+	// Session_id: generate a fresh UUID per request, seeded from the account fingerprint.
 	if strings.Contains(r.Header.Get("User-Agent"), "Mac OS") {
-		misc.EnsureHeader(r.Header, ginHeaders, "Session_id", uuid.NewString())
+		if ginHeaders.Get("Session_id") != "" {
+			r.Header.Set("Session_id", ginHeaders.Get("Session_id"))
+		} else {
+			r.Header.Set("Session_id", fingerprint.NewSessionID(fp))
+		}
 	}
 
 	if stream {
@@ -789,8 +806,8 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 	}
 	if !isAPIKey {
 		if auth != nil && auth.Metadata != nil {
-			if accountID, ok := auth.Metadata["account_id"].(string); ok {
-				r.Header.Set("Chatgpt-Account-Id", accountID)
+			if aid, ok := auth.Metadata["account_id"].(string); ok {
+				r.Header.Set("Chatgpt-Account-Id", aid)
 			}
 		}
 	}
@@ -799,6 +816,23 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 		attrs = auth.Attributes
 	}
 	util.ApplyCustomHeadersFromAttrs(r, attrs)
+}
+
+// codexAccountID extracts the account ID from auth metadata for fingerprint lookup.
+func codexAccountID(auth *cliproxyauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	if auth.Metadata != nil {
+		if v, ok := auth.Metadata["account_id"].(string); ok && v != "" {
+			return v
+		}
+	}
+	// Fall back to auth ID (file name / label) as a stable identifier.
+	if auth.ID != "" {
+		return auth.ID
+	}
+	return auth.Label
 }
 
 func newCodexStatusErr(statusCode int, body []byte) statusErr {
