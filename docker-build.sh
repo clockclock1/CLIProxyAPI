@@ -4,6 +4,7 @@
 #
 # This script automates the process of building and running the Docker container
 # with version information dynamically injected at build time.
+# Only GitHub Container Registry (ghcr.io/clockclock1/cliproxyapi) is used.
 
 # Hidden feature: Preserve usage statistics across rebuilds
 # Usage: ./docker-build.sh --with-usage
@@ -15,6 +16,9 @@ STATS_DIR="temp/stats"
 STATS_FILE="${STATS_DIR}/.usage_backup.json"
 SECRET_FILE="${STATS_DIR}/.api_secret"
 WITH_USAGE=false
+
+# GitHub Container Registry configuration
+GHCR_IMAGE="ghcr.io/clockclock1/cliproxyapi"
 
 get_port() {
   if [[ -f "config.yaml" ]]; then
@@ -125,23 +129,25 @@ esac
 
 # --- Step 1: Choose Environment ---
 echo "Please select an option:"
-echo "1) Run using Pre-built Image (Recommended)"
+echo "1) Run using GitHub Packages Image (Recommended)"
 echo "2) Build from Source and Run (For Developers)"
 read -r -p "Enter choice [1-2]: " choice
 
 # --- Step 2: Execute based on choice ---
 case "$choice" in
   1)
-    echo "--- Running with Pre-built Image ---"
+    echo "--- Running with GitHub Packages Image ---"
+    echo "Image: ${GHCR_IMAGE}:latest"
     if [[ "${WITH_USAGE}" == "true" ]]; then
       export_stats
     fi
+    export CLI_PROXY_IMAGE="${GHCR_IMAGE}:latest"
     docker compose up -d --remove-orphans --no-build
     if [[ "${WITH_USAGE}" == "true" ]]; then
       wait_for_service
       import_stats
     fi
-    echo "Services are starting from remote image."
+    echo "Services are starting from GitHub Packages image."
     echo "Run 'docker compose logs -f' to see the logs."
     ;;
   2)
