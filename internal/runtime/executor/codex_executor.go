@@ -761,32 +761,56 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 	}
 
 	// Resolve per-account fingerprint for unique, stable device identity.
+	// Each account gets a completely distinct non-Microsoft fingerprint.
 	accountID := codexAccountID(auth)
 	fp := fingerprint.ForAccount(accountID)
 
-	// Beta features: gin > config > per-account fingerprint
+	// User-Agent: config > gin > per-account fingerprint (never the shared constant).
+	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
+	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, fp.UserAgent)
+
+	// Version header: per-account fingerprint version (matches UA version).
+	misc.EnsureHeader(r.Header, ginHeaders, "Version", fp.Version)
+
+	// Beta features: gin > config > per-account fingerprint.
 	if ginHeaders.Get("X-Codex-Beta-Features") != "" {
 		r.Header.Set("X-Codex-Beta-Features", ginHeaders.Get("X-Codex-Beta-Features"))
 	} else if fp.BetaFeatures != "" {
 		r.Header.Set("X-Codex-Beta-Features", fp.BetaFeatures)
 	}
 
-	// Version header: use per-account fingerprint version as fallback.
-	misc.EnsureHeader(r.Header, ginHeaders, "Version", fp.Version)
-	misc.EnsureHeader(r.Header, ginHeaders, "X-Codex-Turn-Metadata", "")
-	misc.EnsureHeader(r.Header, ginHeaders, "X-Client-Request-Id", "")
+	// X-Codex-Turn-Metadata: stable per-account JSON blob (gin overrides allowed).
+	if ginHeaders.Get("X-Codex-Turn-Metadata") != "" {
+		r.Header.Set("X-Codex-Turn-Metadata", ginHeaders.Get("X-Codex-Turn-Metadata"))
+	} else if fp.TurnMetadata != "" {
+		r.Header.Set("X-Codex-Turn-Metadata", fp.TurnMetadata)
+	}
 
-	// User-Agent: config > gin > per-account fingerprint (never the shared constant).
-	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
-	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, fp.UserAgent)
+	// X-Client-Request-Id: fresh UUID per request, derived from account prefix.
+	if ginHeaders.Get("X-Client-Request-Id") != "" {
+		r.Header.Set("X-Client-Request-Id", ginHeaders.Get("X-Client-Request-Id"))
+	} else {
+		r.Header.Set("X-Client-Request-Id", fingerprint.NewClientRequestID(fp))
+	}
 
-	// Session_id: generate a fresh UUID per request, seeded from the account fingerprint.
-	if strings.Contains(r.Header.Get("User-Agent"), "Mac OS") {
-		if ginHeaders.Get("Session_id") != "" {
-			r.Header.Set("Session_id", ginHeaders.Get("Session_id"))
-		} else {
-			r.Header.Set("Session_id", fingerprint.NewSessionID(fp))
-		}
+	// Session_id: fresh UUID per request, seeded from account fingerprint.
+	// Mac codex-tui always sends this; Linux builds sometimes omit it.
+	ua := r.Header.Get("User-Agent")
+	isMacUA := strings.Contains(ua, "Mac OS")
+	if ginHeaders.Get("Session_id") != "" {
+		r.Header.Set("Session_id", ginHeaders.Get("Session_id"))
+	} else if isMacUA {
+		r.Header.Set("Session_id", fingerprint.NewSessionID(fp))
+	}
+
+	// Accept-Language: per-account locale (real clients send this).
+	if fp.AcceptLanguage != "" {
+		r.Header.Set("Accept-Language", fp.AcceptLanguage)
+	}
+
+	// DNT (Do-Not-Track): per-account preference.
+	if fp.DNT != "" {
+		r.Header.Set("DNT", fp.DNT)
 	}
 
 	if stream {

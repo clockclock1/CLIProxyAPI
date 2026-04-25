@@ -9,6 +9,8 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/cliproxyapi
 
+# Only GHCR packages are published. DockerHub workflow has been removed.
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
