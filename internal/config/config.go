@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	log "github.com/sirupsen/logrus"
@@ -106,6 +107,9 @@ type Config struct {
 	// These are used only when the client does not send its own headers.
 	CodexHeaderDefaults CodexHeaderDefaults `yaml:"codex-header-defaults" json:"codex-header-defaults"`
 
+	// ProxyPool configures the built-in proxy pool for automatic proxy assignment to accounts.
+	ProxyPool ProxyPoolConfig `yaml:"proxy-pool" json:"proxy-pool"`
+
 	// ClaudeKey defines a list of Claude API key configurations as specified in the YAML configuration file.
 	ClaudeKey []ClaudeKey `yaml:"claude-api-key" json:"claude-api-key"`
 
@@ -161,6 +165,16 @@ type ClaudeHeaderDefaults struct {
 type CodexHeaderDefaults struct {
 	UserAgent    string `yaml:"user-agent" json:"user-agent"`
 	BetaFeatures string `yaml:"beta-features" json:"beta-features"`
+}
+
+type ProxyPoolConfig struct {
+	Enable        bool          `yaml:"enable" json:"enable"`
+	CheckURL      string        `yaml:"check-url" json:"check-url"`
+	CheckInterval time.Duration `yaml:"check-interval" json:"check-interval"`
+	CheckTimeout  time.Duration `yaml:"check-timeout" json:"check-timeout"`
+	MaxFailCount  int           `yaml:"max-fail-count" json:"max-fail-count"`
+	ImportURLs    []string      `yaml:"import-urls" json:"import-urls"`
+	ProxyList     []string      `yaml:"proxy-list" json:"proxy-list"`
 }
 
 // TLSConfig holds HTTPS server settings.

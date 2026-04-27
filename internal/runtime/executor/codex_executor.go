@@ -762,14 +762,23 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 		ginHeaders = ginCtx.Request.Header
 	}
 
+	profile := helps.ResolveCodexDeviceProfile(auth, "", ginHeaders, cfg)
+
 	if ginHeaders.Get("X-Codex-Beta-Features") != "" {
 		r.Header.Set("X-Codex-Beta-Features", ginHeaders.Get("X-Codex-Beta-Features"))
+	} else if profile.BetaFeatures != "" {
+		r.Header.Set("X-Codex-Beta-Features", profile.BetaFeatures)
 	}
 	misc.EnsureHeader(r.Header, ginHeaders, "Version", "")
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Codex-Turn-Metadata", "")
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Client-Request-Id", "")
-	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
-	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, codexUserAgent)
+
+	if strings.TrimSpace(r.Header.Get("User-Agent")) == "" {
+		r.Header.Set("User-Agent", profile.UserAgent)
+	}
+	if strings.TrimSpace(r.Header.Get("Version")) == "" && profile.HasVersion {
+		r.Header.Set("Version", profile.Version.String())
+	}
 
 	if strings.Contains(r.Header.Get("User-Agent"), "Mac OS") {
 		misc.EnsureHeader(r.Header, ginHeaders, "Session_id", uuid.NewString())
@@ -791,7 +800,7 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 	if originator := strings.TrimSpace(ginHeaders.Get("Originator")); originator != "" {
 		r.Header.Set("Originator", originator)
 	} else if !isAPIKey {
-		r.Header.Set("Originator", codexOriginator)
+		r.Header.Set("Originator", profile.Originator)
 	}
 	if !isAPIKey {
 		if auth != nil && auth.Metadata != nil {

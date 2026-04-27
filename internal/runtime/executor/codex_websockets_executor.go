@@ -821,8 +821,15 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 		ginHeaders = ginCtx.Request.Header.Clone()
 	}
 
-	_, cfgBetaFeatures := codexHeaderDefaults(cfg, auth)
-	ensureHeaderWithPriority(headers, ginHeaders, "x-codex-beta-features", cfgBetaFeatures, "")
+	profile := helps.ResolveCodexDeviceProfile(auth, "", ginHeaders, cfg)
+
+	if betaFeatures := strings.TrimSpace(headers.Get("x-codex-beta-features")); betaFeatures == "" {
+		if ginHeaders != nil && ginHeaders.Get("x-codex-beta-features") != "" {
+			headers.Set("x-codex-beta-features", ginHeaders.Get("x-codex-beta-features"))
+		} else if profile.BetaFeatures != "" {
+			headers.Set("x-codex-beta-features", profile.BetaFeatures)
+		}
+	}
 	misc.EnsureHeader(headers, ginHeaders, "x-codex-turn-state", "")
 	misc.EnsureHeader(headers, ginHeaders, "x-codex-turn-metadata", "")
 	misc.EnsureHeader(headers, ginHeaders, "x-client-request-id", "")
@@ -851,7 +858,7 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 	if originator := strings.TrimSpace(ginHeaders.Get("Originator")); originator != "" {
 		headers.Set("Originator", originator)
 	} else if !isAPIKey {
-		headers.Set("Originator", codexOriginator)
+		headers.Set("Originator", profile.Originator)
 	}
 	if !isAPIKey {
 		if auth != nil && auth.Metadata != nil {

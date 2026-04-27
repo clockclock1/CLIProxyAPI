@@ -133,6 +133,12 @@ var anthropicHosts = map[string]struct{}{
 	"api.anthropic.com": {},
 }
 
+var codexHosts = map[string]struct{}{
+	"chatgpt.com":       {},
+	"auth.openai.com":   {},
+	"api.openai.com":    {},
+}
+
 // fallbackRoundTripper uses utls for Anthropic HTTPS hosts and falls back to
 // standard transport for all other requests (non-HTTPS or non-Anthropic hosts).
 type fallbackRoundTripper struct {
@@ -142,7 +148,11 @@ type fallbackRoundTripper struct {
 
 func (f *fallbackRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL.Scheme == "https" {
-		if _, ok := anthropicHosts[strings.ToLower(req.URL.Hostname())]; ok {
+		hostname := strings.ToLower(req.URL.Hostname())
+		if _, ok := anthropicHosts[hostname]; ok {
+			return f.utls.RoundTrip(req)
+		}
+		if _, ok := codexHosts[hostname]; ok {
 			return f.utls.RoundTrip(req)
 		}
 	}

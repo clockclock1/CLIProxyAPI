@@ -12,6 +12,7 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/proxypool"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy"
 	log "github.com/sirupsen/logrus"
 )
@@ -25,6 +26,32 @@ import (
 //   - configPath: The path to the configuration file
 //   - localPassword: Optional password accepted for local management requests
 func StartService(cfg *config.Config, configPath string, localPassword string) {
+	if cfg.ProxyPool.Enable {
+		poolCfg := proxypool.PoolConfig{
+			CheckURL:      cfg.ProxyPool.CheckURL,
+			CheckInterval: cfg.ProxyPool.CheckInterval,
+			CheckTimeout:  cfg.ProxyPool.CheckTimeout,
+			MaxFailCount:  cfg.ProxyPool.MaxFailCount,
+			ImportURLs:    cfg.ProxyPool.ImportURLs,
+			ProxyList:     cfg.ProxyPool.ProxyList,
+		}
+		if poolCfg.CheckURL == "" {
+			poolCfg.CheckURL = "https://cloudflare.com/cdn-cgi/trace"
+		}
+		if poolCfg.CheckInterval == 0 {
+			poolCfg.CheckInterval = 5 * time.Minute
+		}
+		if poolCfg.CheckTimeout == 0 {
+			poolCfg.CheckTimeout = 10 * time.Second
+		}
+		if poolCfg.MaxFailCount == 0 {
+			poolCfg.MaxFailCount = 3
+		}
+		proxypool.InitGlobalPool(poolCfg)
+		log.Info("proxy pool initialized and health check started")
+		defer proxypool.StopGlobalPool()
+	}
+
 	builder := cliproxy.NewBuilder().
 		WithConfig(cfg).
 		WithConfigPath(configPath).
