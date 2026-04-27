@@ -837,10 +837,18 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 		betaHeader = codexResponsesWebsocketBetaHeaderValue
 	}
 	headers.Set("OpenAI-Beta", betaHeader)
+
+	if cfg != nil && cfg.ProxyPool.Enabled && cfg.ProxyPool.CodexFingerprint && auth != nil {
+		profile := helps.ResolveCodexDeviceProfile(auth, cfg)
+		headers.Del("User-Agent")
+		headers.Set("User-Agent", profile.UserAgent)
+	} else {
+		headers.Del("User-Agent")
+	}
+
 	if strings.Contains(headers.Get("User-Agent"), "Mac OS") {
 		misc.EnsureHeader(headers, ginHeaders, "Session_id", uuid.NewString())
 	}
-	headers.Del("User-Agent")
 
 	isAPIKey := false
 	if auth != nil && auth.Attributes != nil {
@@ -850,7 +858,7 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 	}
 	if originator := strings.TrimSpace(ginHeaders.Get("Originator")); originator != "" {
 		headers.Set("Originator", originator)
-	} else if !isAPIKey {
+	} else if !isAPIKey && headers.Get("Originator") == "" {
 		headers.Set("Originator", codexOriginator)
 	}
 	if !isAPIKey {

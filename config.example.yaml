@@ -218,6 +218,16 @@ nonstream-keepalive-interval: 0
 #   timeout: "600"
 #   stabilize-device-profile: false  # optional, default false; set true to enable per-auth/API-key fingerprint pinning
 
+# Proxy pool settings for centralized proxy management and auto-assignment
+# proxy-pool:
+#   enabled: true
+#   check-interval: 300       # Health check interval in seconds (default: 300)
+#   concurrency: 16           # Concurrent proxy health checks (default: 16)
+#   auto-assign: true         # Auto-assign alive proxies to accounts without proxy
+#   codex-fingerprint: true   # Enable per-account unique Codex client fingerprint simulation
+#   import-urls:              # URLs to import proxies from on startup
+#     - "https://socks.clock1.cc.cd/api/proxies?page=1&per_page=100"
+
 # Default headers for Codex OAuth model requests.
 # These are used only for file-backed/OAuth Codex requests when the client
 # does not send the header. `user-agent` applies to HTTP and websocket requests;

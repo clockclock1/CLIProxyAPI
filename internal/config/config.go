@@ -134,6 +134,9 @@ type Config struct {
 	// gemini-api-key, codex-api-key, claude-api-key, openai-compatibility, vertex-api-key, and ampcode.
 	OAuthModelAlias map[string][]OAuthModelAlias `yaml:"oauth-model-alias,omitempty" json:"oauth-model-alias,omitempty"`
 
+	// ProxyPool configures the centralized proxy pool feature.
+	ProxyPool ProxyPoolConfig `yaml:"proxy-pool" json:"proxy-pool"`
+
 	// Payload defines default and override rules for provider payload parameters.
 	Payload PayloadConfig `yaml:"payload" json:"payload"`
 
@@ -153,6 +156,22 @@ type ClaudeHeaderDefaults struct {
 	Arch                   string `yaml:"arch" json:"arch"`
 	Timeout                string `yaml:"timeout" json:"timeout"`
 	StabilizeDeviceProfile *bool  `yaml:"stabilize-device-profile,omitempty" json:"stabilize-device-profile,omitempty"`
+}
+
+// ProxyPoolConfig configures the centralized proxy pool for managing and assigning proxies to accounts.
+type ProxyPoolConfig struct {
+	// Enabled toggles the proxy pool feature.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// CheckInterval is the interval between automatic proxy health checks in seconds. Default: 300.
+	CheckInterval int `yaml:"check-interval" json:"check-interval"`
+	// Concurrency controls how many proxies are tested concurrently during health checks. Default: 16.
+	Concurrency int `yaml:"concurrency" json:"concurrency"`
+	// AutoAssign enables automatic proxy assignment to accounts that don't have a proxy configured.
+	AutoAssign bool `yaml:"auto-assign" json:"auto-assign"`
+	// ImportURLs is a list of URLs to import proxies from on startup.
+	ImportURLs []string `yaml:"import-urls" json:"import-urls"`
+	// CodexFingerprint enables per-account unique Codex client fingerprint simulation.
+	CodexFingerprint bool `yaml:"codex-fingerprint" json:"codex-fingerprint"`
 }
 
 // CodexHeaderDefaults configures fallback header values injected into Codex

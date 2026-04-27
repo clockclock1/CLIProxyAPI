@@ -768,8 +768,14 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 	misc.EnsureHeader(r.Header, ginHeaders, "Version", "")
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Codex-Turn-Metadata", "")
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Client-Request-Id", "")
-	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
-	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, codexUserAgent)
+
+	if cfg != nil && cfg.ProxyPool.Enabled && cfg.ProxyPool.CodexFingerprint && auth != nil {
+		profile := helps.ResolveCodexDeviceProfile(auth, cfg)
+		helps.ApplyCodexDeviceProfileHeaders(r, profile)
+	} else {
+		cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
+		ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, codexUserAgent)
+	}
 
 	if strings.Contains(r.Header.Get("User-Agent"), "Mac OS") {
 		misc.EnsureHeader(r.Header, ginHeaders, "Session_id", uuid.NewString())
@@ -790,7 +796,7 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 	}
 	if originator := strings.TrimSpace(ginHeaders.Get("Originator")); originator != "" {
 		r.Header.Set("Originator", originator)
-	} else if !isAPIKey {
+	} else if !isAPIKey && r.Header.Get("Originator") == "" {
 		r.Header.Set("Originator", codexOriginator)
 	}
 	if !isAPIKey {
